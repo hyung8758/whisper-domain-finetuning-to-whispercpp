@@ -1,0 +1,14 @@
+/data/*
+!/data/
+!/data/.gitkeep
+/exp/*
+!/exp/
+!/exp/.gitkeep
+/third_party/whisper.cpp/build*/
+/third_party/whisper.cpp/models/*.bin
+/third_party/whisper.cpp/models/*.gguf
+__pycache__/
+*.py[cod]
+*.out
+*.log
+.DS_Store
