@@ -112,15 +112,30 @@ def validate_output_dir(output_dir: Path, overwrite: bool) -> None:
         shutil.rmtree(output_dir)
 
 
+def has_processor_files(path: Path) -> bool:
+    config_exists = (path / "preprocessor_config.json").exists() or (path / "processor_config.json").exists()
+    tokenizer_exists = any(
+        (path / name).exists()
+        for name in ("tokenizer.json", "tokenizer_config.json", "vocab.json")
+    )
+    return path.is_dir() and config_exists and tokenizer_exists
+
+
 def save_processor(base_model_name_or_path: str, train_dir: Path, adapter_path: Path, output_dir: Path) -> str:
     from transformers import WhisperProcessor
 
     for processor_path in (adapter_path, train_dir / "processor"):
-        if (processor_path / "preprocessor_config.json").exists():
-            processor = WhisperProcessor.from_pretrained(processor_path)
+        if has_processor_files(processor_path):
+            LOGGER.info("Saving processor from: %s", processor_path)
+            try:
+                processor = WhisperProcessor.from_pretrained(processor_path)
+            except Exception as exc:
+                LOGGER.warning("Could not load processor from %s: %s", processor_path, exc)
+                continue
             processor.save_pretrained(output_dir)
             return str(processor_path)
 
+    LOGGER.info("Saving processor from base model: %s", base_model_name_or_path)
     processor = WhisperProcessor.from_pretrained(base_model_name_or_path)
     processor.save_pretrained(output_dir)
     return base_model_name_or_path

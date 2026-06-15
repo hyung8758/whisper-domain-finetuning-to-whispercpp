@@ -1,6 +1,7 @@
 """Merge된 Hugging Face Whisper 모델을 whisper.cpp용 ggml 모델로 변환한다."""
 
 import argparse
+import json
 import logging
 import subprocess
 import sys
@@ -14,6 +15,10 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 LOGGER = logging.getLogger("convert_merged_lora_whisper_model_to_whisper_cpp")
 DEFAULT_QUANTIZATIONS = ("q8_0", "q5_0")
+
+
+class WhisperCppBuildRequiredError(RuntimeError):
+    pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +54,66 @@ def validate_whisper_python_root(path: Path) -> None:
         raise FileNotFoundError(f"OpenAI Whisper assets not found: {mel_filters}")
 
 
+def load_tokenizer_json(path: Path) -> dict[str, Any]:
+    tokenizer_path = path / "tokenizer.json"
+    if not tokenizer_path.exists():
+        raise FileNotFoundError(f"Tokenizer JSON not found: {tokenizer_path}")
+    with tokenizer_path.open("r", encoding="utf-8") as handle:
+        tokenizer = json.load(handle)
+    if not isinstance(tokenizer, dict):
+        raise ValueError(f"Tokenizer JSON must be an object: {tokenizer_path}")
+    return tokenizer
+
+
+def legacy_vocab_from_tokenizer(tokenizer: dict[str, Any], tokenizer_path: Path) -> dict[str, int]:
+    model = tokenizer.get("model")
+    vocab = model.get("vocab") if isinstance(model, dict) else None
+    if not isinstance(vocab, dict):
+        raise ValueError(f"tokenizer.json is missing model.vocab: {tokenizer_path}")
+    return {str(token): int(index) for token, index in vocab.items()}
+
+
+def legacy_added_tokens_from_tokenizer(tokenizer: dict[str, Any], vocab: dict[str, int], tokenizer_path: Path) -> dict[str, int]:
+    added_tokens = tokenizer.get("added_tokens")
+    if not isinstance(added_tokens, list):
+        raise ValueError(f"tokenizer.json is missing added_tokens list: {tokenizer_path}")
+
+    vocab_ids = set(vocab.values())
+    legacy_added_tokens = {}
+    for item in added_tokens:
+        if not isinstance(item, dict) or "content" not in item or "id" not in item:
+            raise ValueError(f"Invalid added token entry in {tokenizer_path}: {item}")
+        token_id = int(item["id"])
+        if token_id in vocab_ids:
+            continue
+        legacy_added_tokens[str(item["content"])] = token_id
+    return legacy_added_tokens
+
+
+def write_legacy_tokenizer_json(path: Path, payload: dict[str, int]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def ensure_legacy_tokenizer_files(path: Path) -> None:
+    missing = [name for name in ("vocab.json", "added_tokens.json") if not (path / name).exists()]
+    if not missing:
+        return
+
+    tokenizer_path = path / "tokenizer.json"
+    tokenizer = load_tokenizer_json(path)
+    vocab = legacy_vocab_from_tokenizer(tokenizer, tokenizer_path)
+    added_tokens = legacy_added_tokens_from_tokenizer(tokenizer, vocab, tokenizer_path)
+
+    if "vocab.json" in missing:
+        write_legacy_tokenizer_json(path / "vocab.json", vocab)
+        LOGGER.info("Wrote legacy tokenizer vocab: %s", path / "vocab.json")
+    if "added_tokens.json" in missing:
+        write_legacy_tokenizer_json(path / "added_tokens.json", added_tokens)
+        LOGGER.info("Wrote legacy added tokens: %s", path / "added_tokens.json")
+
+
 def validate_model_dir(path: Path) -> None:
     required_files = ("config.json", "vocab.json", "added_tokens.json")
     missing = [name for name in required_files if not (path / name).exists()]
@@ -73,9 +138,14 @@ def find_quantize_binary(whisper_cpp_dir: Path) -> Path:
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError(
-        "whisper.cpp quantize binary not found. Build whisper.cpp first, expected one of: "
-        + ", ".join(str(path) for path in candidates)
+    raise WhisperCppBuildRequiredError(
+        "whisper.cpp quantize binary not found.\n"
+        "Build whisper.cpp first, then run conversion again.\n\n"
+        "CUDA build:\n"
+        "  cmake -S third_party/whisper.cpp -B third_party/whisper.cpp/build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release\n"
+        '  cmake --build third_party/whisper.cpp/build --config Release -j "$(nproc)"\n\n'
+        "Expected one of:\n  "
+        + "\n  ".join(str(path) for path in candidates)
     )
 
 
@@ -201,6 +271,7 @@ def convert_merged_lora_whisper_model_to_whisper_cpp(args: argparse.Namespace) -
         else find_whisper_python_root()
     )
 
+    ensure_legacy_tokenizer_files(model_dir)
     validate_model_dir(model_dir)
     validate_whisper_python_root(whisper_python_root)
     quantize_binary = find_quantize_binary(whisper_cpp_dir)
@@ -252,7 +323,11 @@ def main() -> None:
     output_dir = resolve_project_path(args.output_dir) if args.output_dir is not None else default_output_dir(resolve_project_path(args.model_dir))
     setup_logging(output_dir / "convert.log")
     LOGGER.info("=== whisper.cpp conversion started ===")
-    summary = convert_merged_lora_whisper_model_to_whisper_cpp(args)
+    try:
+        summary = convert_merged_lora_whisper_model_to_whisper_cpp(args)
+    except WhisperCppBuildRequiredError as exc:
+        LOGGER.error("%s", exc)
+        raise SystemExit(1) from None
     LOGGER.info("ggml model: %s", summary["ggml_model"]["path"])
     for model in summary["quantized_models"]:
         LOGGER.info("quantized model: %s", model["path"])
