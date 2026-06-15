@@ -72,6 +72,7 @@ def build_config(args: argparse.Namespace) -> dict[str, Any]:
         "manifest_path": str(resolve_path(args.manifest_path)),
         "result_root": str(resolve_path(args.result_dir).parent),
         "result_dir": str(resolve_path(args.result_dir)),
+        "project_root": str(PROJECT_ROOT),
         "server_binary_path": str(resolve_path(args.server_binary_path)),
         "host": args.host,
         "port": args.port,

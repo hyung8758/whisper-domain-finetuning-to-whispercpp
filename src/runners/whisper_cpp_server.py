@@ -118,7 +118,11 @@ def start_server(config: dict[str, Any], log_path: Path) -> subprocess.Popen:
     log_file = log_path.open("a", encoding="utf-8")
     process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=whisper_cpp_env(config))
     process._stt_log_file = log_file
-    wait_for_server(config, process)
+    try:
+        wait_for_server(config, process)
+    except Exception:
+        stop_server(process)
+        raise
     return process
 
 
@@ -156,8 +160,14 @@ def parse_response(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]], flo
     return prediction_raw, segments, float(inference_sec) if inference_sec is not None else None
 
 
-def transcribe(server_url: str, item: dict[str, Any], fields: dict[str, str], timeout: float | None) -> tuple[dict[str, Any], float]:
-    with prepared_audio_path(item) as audio_path:
+def transcribe(
+    server_url: str,
+    item: dict[str, Any],
+    fields: dict[str, str],
+    timeout: float | None,
+    project_root: Path | None = None,
+) -> tuple[dict[str, Any], float]:
+    with prepared_audio_path(item, project_root=project_root) as audio_path:
         start = time.perf_counter()
         with audio_path.open("rb") as audio_file:
             files = {"file": (audio_path.name, audio_file, "audio/wav")}
@@ -171,8 +181,9 @@ def warmup_server(config: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     if not config.get("warmup") or not rows:
         return
     server_url = f"http://{config['host']}:{config['port']}/inference"
+    project_root = Path(config["project_root"]) if config.get("project_root") else None
     try:
-        transcribe(server_url, rows[0], request_fields(config), config.get("request_timeout_seconds"))
+        transcribe(server_url, rows[0], request_fields(config), config.get("request_timeout_seconds"), project_root)
         LOGGER.info("Warmup finished with id=%s", rows[0]["id"])
     except Exception:
         LOGGER.exception("Warmup failed; eval decoding will continue")
@@ -190,6 +201,7 @@ def decode_rows(
     error_path.parent.mkdir(parents=True, exist_ok=True)
     server_url = f"http://{config['host']}:{config['port']}/inference"
     fields = request_fields(config)
+    project_root = Path(config["project_root"]) if config.get("project_root") else None
     decoded_count = 0
     error_count = 0
 
@@ -209,6 +221,7 @@ def decode_rows(
                     item,
                     fields,
                     config.get("request_timeout_seconds"),
+                    project_root,
                 )
                 prediction_raw, segments, inference_sec = parse_response(data)
                 backend_time = inference_sec if inference_sec is not None else request_time
