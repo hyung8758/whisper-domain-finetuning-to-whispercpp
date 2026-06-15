@@ -17,10 +17,6 @@ LOGGER = logging.getLogger("convert_merged_lora_whisper_model_to_whisper_cpp")
 DEFAULT_QUANTIZATIONS = ("q8_0", "q5_0")
 
 
-class WhisperCppBuildRequiredError(RuntimeError):
-    pass
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Merge된 Whisper 모델을 whisper.cpp ggml/q8_0/q5_0 모델로 변환한다.")
     parser.add_argument("--model_dir", type=Path, required=True)
@@ -128,25 +124,6 @@ def find_convert_script(whisper_cpp_dir: Path) -> Path:
     if not script.exists():
         raise FileNotFoundError(f"whisper.cpp conversion script not found: {script}")
     return script
-
-
-def find_quantize_binary(whisper_cpp_dir: Path) -> Path:
-    candidates = (
-        whisper_cpp_dir / "build" / "bin" / "whisper-quantize",
-        whisper_cpp_dir / "build" / "bin" / "quantize",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise WhisperCppBuildRequiredError(
-        "whisper.cpp quantize binary not found.\n"
-        "Build whisper.cpp first, then run conversion again.\n\n"
-        "CUDA build:\n"
-        "  cmake -S third_party/whisper.cpp -B third_party/whisper.cpp/build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release\n"
-        '  cmake --build third_party/whisper.cpp/build --config Release -j "$(nproc)"\n\n'
-        "Expected one of:\n  "
-        + "\n  ".join(str(path) for path in candidates)
-    )
 
 
 def run_command(
@@ -260,7 +237,7 @@ def model_file_summary(path: Path) -> dict[str, Any]:
 
 def convert_merged_lora_whisper_model_to_whisper_cpp(args: argparse.Namespace) -> dict[str, Any]:
     from core.io import write_json
-    from whisper_cpp.runtime import env_with_library_dirs, library_dirs_from_project
+    from whisper_cpp.runtime import env_with_library_dirs, find_quantize_binary, library_dirs_from_project
 
     model_dir = resolve_project_path(args.model_dir)
     whisper_cpp_dir = resolve_project_path(args.whisper_cpp_dir)
@@ -318,6 +295,7 @@ def convert_merged_lora_whisper_model_to_whisper_cpp(args: argparse.Namespace) -
 
 def main() -> None:
     from core.logging_utils import setup_logging
+    from whisper_cpp.runtime import WhisperCppBinaryNotFoundError
 
     args = parse_args()
     output_dir = resolve_project_path(args.output_dir) if args.output_dir is not None else default_output_dir(resolve_project_path(args.model_dir))
@@ -325,8 +303,13 @@ def main() -> None:
     LOGGER.info("=== whisper.cpp conversion started ===")
     try:
         summary = convert_merged_lora_whisper_model_to_whisper_cpp(args)
-    except WhisperCppBuildRequiredError as exc:
+    except WhisperCppBinaryNotFoundError as exc:
         LOGGER.error("%s", exc)
+        LOGGER.error(
+            "CUDA build example: cmake -S third_party/whisper.cpp -B third_party/whisper.cpp/build "
+            "-DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release && "
+            'cmake --build third_party/whisper.cpp/build --config Release -j "$(nproc)"'
+        )
         raise SystemExit(1) from None
     LOGGER.info("ggml model: %s", summary["ggml_model"]["path"])
     for model in summary["quantized_models"]:
