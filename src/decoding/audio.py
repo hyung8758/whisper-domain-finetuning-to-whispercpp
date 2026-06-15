@@ -14,8 +14,15 @@ from data.audio import (
 )
 
 
-def needs_temporary_wav(item: dict[str, Any]) -> bool:
-    audio_path = Path(item["audio"])
+def resolve_audio_path(item: dict[str, Any], project_root: Path | None = None) -> Path:
+    audio_path = Path(str(item["audio"]))
+    if audio_path.is_absolute() or project_root is None:
+        return audio_path
+    return project_root / audio_path
+
+
+def needs_temporary_wav(item: dict[str, Any], project_root: Path | None = None) -> bool:
+    audio_path = resolve_audio_path(item, project_root)
     sample_rate = item.get("audio_sample_rate", item.get("source_sample_rate"))
     return (
         has_audio_segment(item)
@@ -28,9 +35,10 @@ def needs_temporary_wav(item: dict[str, Any]) -> bool:
 def prepared_audio_path(
     item: dict[str, Any],
     target_sample_rate: int = TARGET_SAMPLE_RATE,
+    project_root: Path | None = None,
 ) -> Iterator[Path]:
-    audio_path = Path(item["audio"])
-    if not needs_temporary_wav(item):
+    audio_path = resolve_audio_path(item, project_root)
+    if not needs_temporary_wav(item, project_root):
         yield audio_path
         return
 

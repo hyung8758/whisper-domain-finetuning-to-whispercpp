@@ -57,21 +57,9 @@ def default_result_dir(result_root: Path, model_path: Path, beam_size: int) -> P
     return result_root / f"{converted_name}_whisper_cpp_{model_name}_beam{beam_size}"
 
 
-def find_whisper_cli(whisper_cpp_dir: Path) -> Path:
-    candidates = (
-        whisper_cpp_dir / "build" / "bin" / "whisper-cli",
-        whisper_cpp_dir / "build" / "bin" / "main",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        "whisper.cpp CLI binary not found. Build whisper.cpp first. "
-        "Expected one of: " + ", ".join(str(path) for path in candidates)
-    )
-
-
 def build_config(args: argparse.Namespace) -> dict[str, Any]:
+    from whisper_cpp.runtime import find_cli_binary
+
     model_path = resolve_required_path(args.model_path)
     manifest_path = resolve_required_path(args.manifest_path)
     result_root = resolve_required_path(args.result_root)
@@ -81,7 +69,11 @@ def build_config(args: argparse.Namespace) -> dict[str, Any]:
         else default_result_dir(result_root, model_path, args.beam_size)
     )
     whisper_cpp_dir = resolve_required_path(args.whisper_cpp_dir)
-    whisper_cli = find_whisper_cli(whisper_cpp_dir)
+    whisper_cli = find_cli_binary(whisper_cpp_dir)
+    if not model_path.is_file():
+        raise FileNotFoundError(f"whisper.cpp model not found: {model_path}")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
 
     return {
         "engine": "whisper_cpp",
@@ -144,11 +136,7 @@ def parse_whisper_cpp_json(path: Path) -> tuple[str, list[dict[str, Any]]]:
     return " ".join(text for text in texts if text).strip(), segments
 
 
-def build_whisper_cpp_command(config: dict[str, Any], item: dict[str, Any], output_base: Path) -> list[str]:
-    audio_path = Path(str(item["audio"]))
-    if not audio_path.is_absolute():
-        audio_path = DOMAIN_ROOT / audio_path
-
+def build_whisper_cpp_command(config: dict[str, Any], audio_path: Path, output_base: Path) -> list[str]:
     command = [
         config["whisper_cli"],
         "-m",
@@ -174,6 +162,8 @@ def build_whisper_cpp_command(config: dict[str, Any], item: dict[str, Any], outp
 
 
 def run_whisper_cli(config: dict[str, Any], item: dict[str, Any], command_env: dict[str, str]) -> tuple[str, list[dict[str, Any]], float]:
+    from decoding.audio import prepared_audio_path
+
     result_dir = Path(config["result_dir"])
     output_base = temp_output_base(result_dir, str(item["id"]))
     output_base.parent.mkdir(parents=True, exist_ok=True)
@@ -181,19 +171,20 @@ def run_whisper_cli(config: dict[str, Any], item: dict[str, Any], command_env: d
     if json_path.exists():
         json_path.unlink()
 
-    command = build_whisper_cpp_command(config, item, output_base)
-    start = time.perf_counter()
-    completed = subprocess.run(
-        command,
-        cwd=DOMAIN_ROOT,
-        env=command_env,
-        check=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+    with prepared_audio_path(item, project_root=DOMAIN_ROOT) as audio_path:
+        command = build_whisper_cpp_command(config, audio_path, output_base)
+        start = time.perf_counter()
+        completed = subprocess.run(
+            command,
+            cwd=DOMAIN_ROOT,
+            env=command_env,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
     decode_time = time.perf_counter() - start
     if completed.returncode != 0:
         tail = "\n".join((completed.stdout or "").splitlines()[-40:])
@@ -210,7 +201,8 @@ def evaluate_if_needed(args: argparse.Namespace, manifest_path: Path, result_dir
         LOGGER.info("Evaluation skipped by --no_evaluate")
         return
     if args.num_shards != 1:
-        LOGGER.info("Shard mode detected. Evaluate after all shards finish with core.metrics.evaluate_result_dir.")
+        LOGGER.info("Shard mode detected. Evaluate after all shards finish:")
+        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --result_dir %s", manifest_path, result_dir)
         return
 
     from core.metrics import evaluate_result_dir
