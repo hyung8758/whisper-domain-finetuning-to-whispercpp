@@ -57,7 +57,14 @@ def prepare_decode_run(config: dict[str, Any], args) -> DecodeRun:
     retry_errors = bool(getattr(args, "retry_errors", False))
     reset_outputs_if_needed(prediction_path, error_path, resume=resume)
 
-    manifest_rows = read_jsonl(Path(config["manifest_path"]))
+    manifest_path = Path(config["manifest_path"])
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+
+    manifest_rows = read_jsonl(manifest_path)
+    if not manifest_rows:
+        raise ValueError(f"Manifest is empty: {manifest_path}")
+
     rows = select_shard(manifest_rows, args.num_shards, args.shard_index)
     done_ids = load_finished_ids(prediction_path, error_path, resume=resume, retry_errors=retry_errors)
 

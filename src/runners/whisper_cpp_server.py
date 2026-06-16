@@ -116,7 +116,12 @@ def start_server(config: dict[str, Any], log_path: Path) -> subprocess.Popen:
     command = server_command(config)
     LOGGER.info("Starting whisper-server: %s", " ".join(command))
     log_file = log_path.open("a", encoding="utf-8")
-    process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=whisper_cpp_env(config))
+    try:
+        process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=whisper_cpp_env(config))
+    except Exception:
+        log_file.close()
+        raise
+
     process._stt_log_file = log_file
     try:
         wait_for_server(config, process)
