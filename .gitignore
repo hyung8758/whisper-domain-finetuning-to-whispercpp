@@ -6,6 +6,7 @@
 /exp/*
 !/exp/
 !/exp/.gitkeep
+/protected_exp/
 /third_party/whisper.cpp/build*/
 /third_party/whisper.cpp/models/*.bin
 /third_party/whisper.cpp/models/*.gguf
