@@ -26,10 +26,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--data_root", type=Path, default=PROJECT_ROOT / "data" / "download")
     parser.add_argument(
-        "--output_root",
+        "--output_dir",
+        dest="output_dir",
         type=Path,
         default=PROJECT_ROOT / "data" / "whisper_small_lora",
     )
+    parser.add_argument("--output_root", dest="output_dir", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     parser.add_argument("--project_root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--sample_rate", type=int, default=DEFAULT_SAMPLE_RATE)
     parser.add_argument("--dev_ratio", type=float, default=DEFAULT_DEV_RATIO)
@@ -69,7 +71,7 @@ def main() -> None:
 
     summary = prepare_finetuning_data(
         data_root=args.data_root,
-        output_root=args.output_root,
+        output_root=args.output_dir,
         project_root=args.project_root,
         dev_ratio=args.dev_ratio,
         eval_ratio=args.eval_ratio,
@@ -86,7 +88,7 @@ def main() -> None:
         overwrite=args.overwrite,
     )
     validation = validate_finetuning_data(
-        output_root=args.output_root,
+        manifest_dir=args.output_dir,
         project_root=args.project_root,
     )
     if validation["errors"]:

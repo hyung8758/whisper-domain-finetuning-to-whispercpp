@@ -13,8 +13,12 @@ from core.metrics import evaluate_result_dir
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="predictions.jsonl을 평가하고 metrics.json을 생성한다.")
     parser.add_argument("--manifest_path", type=Path, default=Path("data/whisper_small_lora/eval.jsonl"))
-    parser.add_argument("--result_dir", type=Path, required=True)
-    return parser.parse_args()
+    parser.add_argument("--output_dir", type=Path, default=None)
+    parser.add_argument("--result_dir", dest="output_dir", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.output_dir is None:
+        parser.error("--output_dir is required")
+    return args
 
 
 def resolve_path(path: Path) -> Path:
@@ -26,9 +30,9 @@ def resolve_path(path: Path) -> Path:
 def main() -> None:
     args = parse_args()
     manifest_path = resolve_path(args.manifest_path)
-    result_dir = resolve_path(args.result_dir)
-    setup_logging(result_dir / "logs" / "evaluate.log")
-    evaluate_result_dir(manifest_path, result_dir)
+    output_dir = resolve_path(args.output_dir)
+    setup_logging(output_dir / "logs" / "evaluate.log")
+    evaluate_result_dir(manifest_path, output_dir)
 
 
 if __name__ == "__main__":

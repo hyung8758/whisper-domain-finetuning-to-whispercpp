@@ -22,9 +22,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data/whisper_small_lora/eval.jsonl"),
     )
-    parser.add_argument("--result_root", type=Path, default=Path("exp/results"))
-    parser.add_argument("--result_dir", "--output_dir", dest="result_dir", type=Path, default=None)
-    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--output_root", type=Path, default=Path("exp/results"))
+    parser.add_argument("--result_root", dest="output_root", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--output_dir", type=Path, default=None)
+    parser.add_argument("--result_dir", dest="output_dir", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    parser.add_argument("--device_index", type=int, default=0)
     parser.add_argument("--precision", choices=("float16", "float32", "bfloat16"), default="float16")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--language", default="ko")
@@ -37,8 +40,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def default_result_dir(result_root: Path, experiment_name: str) -> Path:
-    return result_root / experiment_name
+def default_output_dir(output_root: Path, experiment_name: str) -> Path:
+    return output_root / experiment_name
 
 
 def resolve_required_path(path: Path) -> Path:
@@ -55,19 +58,23 @@ def build_config(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
 
     model_dir = resolve_required_path(args.model_dir)
     manifest_path = resolve_required_path(args.manifest_path)
-    result_root = resolve_required_path(args.result_root)
+    output_root = resolve_required_path(args.output_root)
     experiment_name = f"{model_dir.name}_beam{args.beam_size}_{args.precision}"
-    result_dir = (
-        resolve_required_path(args.result_dir)
-        if args.result_dir is not None
-        else default_result_dir(result_root, experiment_name)
+    output_dir = (
+        resolve_required_path(args.output_dir)
+        if args.output_dir is not None
+        else default_output_dir(output_root, experiment_name)
     )
+    runtime_device = "cpu" if args.device == "cpu" else f"cuda:{args.device_index}"
 
     config = {
         "engine": "whisper_lora_merged",
         "manifest_path": str(manifest_path),
-        "result_root": str(result_root),
-        "device": args.device,
+        "output_root": str(output_root),
+        "result_root": str(output_root),
+        "device": runtime_device,
+        "device_type": args.device,
+        "device_index": args.device_index,
         "language": args.language,
         "decode_defaults": {
             "task": "transcribe",
@@ -84,7 +91,7 @@ def build_config(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "precision": args.precision,
         "return_timestamps": False,
     }
-    return build_run_config(config, experiment, result_dir), manifest_path
+    return build_run_config(config, experiment, output_dir), manifest_path
 
 
 def evaluate_if_needed(args: argparse.Namespace, manifest_path: Path, result_dir: Path) -> None:
@@ -93,7 +100,7 @@ def evaluate_if_needed(args: argparse.Namespace, manifest_path: Path, result_dir
         return
     if args.num_shards != 1:
         LOGGER.info("Shard mode detected. Evaluate after all shards finish:")
-        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --result_dir %s", manifest_path, result_dir)
+        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --output_dir %s", manifest_path, result_dir)
         return
 
     from core.metrics import evaluate_result_dir
@@ -115,7 +122,7 @@ def main() -> None:
     LOGGER.info("Merged model decoding: model=%s manifest=%s", run_config["model"], run_config["manifest_path"])
     run_huggingface_transformers(run_config, args)
     evaluate_if_needed(args, manifest_path, result_dir)
-    LOGGER.info("Result dir: %s", result_dir)
+    LOGGER.info("Output dir: %s", result_dir)
     LOGGER.info("=== DONE Merged Whisper decoding ===")
 
 

@@ -22,7 +22,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_dir", type=Path, required=True)
     parser.add_argument("--output_dir", type=Path, default=None)
     parser.add_argument("--whisper_cpp_dir", type=Path, default=PROJECT_ROOT / "third_party" / "whisper.cpp")
-    parser.add_argument("--whisper_python_root", type=Path, default=None)
+    parser.add_argument("--whisper_python_dir", type=Path, default=None)
+    parser.add_argument(
+        "--whisper_python_root",
+        dest="whisper_python_dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--quantizations", nargs="+", default=list(DEFAULT_QUANTIZATIONS))
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -38,13 +45,13 @@ def default_output_dir(model_dir: Path) -> Path:
     return PROJECT_ROOT / "exp" / "converted_model" / model_dir.name
 
 
-def find_whisper_python_root() -> Path:
+def find_whisper_python_dir() -> Path:
     import whisper
 
     return Path(whisper.__file__).resolve().parents[1]
 
 
-def validate_whisper_python_root(path: Path) -> None:
+def validate_whisper_python_dir(path: Path) -> None:
     mel_filters = path / "whisper" / "assets" / "mel_filters.npz"
     if not mel_filters.exists():
         raise FileNotFoundError(f"OpenAI Whisper assets not found: {mel_filters}")
@@ -170,7 +177,7 @@ def write_command_log(log_path: Path, title: str, completed: subprocess.Complete
 def convert_to_ggml(
     model_dir: Path,
     whisper_cpp_dir: Path,
-    whisper_python_root: Path,
+    whisper_python_dir: Path,
     output_dir: Path,
     overwrite: bool,
     log_path: Path,
@@ -187,7 +194,7 @@ def convert_to_ggml(
         sys.executable,
         str(find_convert_script(whisper_cpp_dir)),
         str(model_dir),
-        str(whisper_python_root),
+        str(whisper_python_dir),
         str(output_dir),
     ]
     completed = run_command(command, cwd=PROJECT_ROOT)
@@ -242,15 +249,15 @@ def convert_merged_lora_whisper_model_to_whisper_cpp(args: argparse.Namespace) -
     model_dir = resolve_project_path(args.model_dir)
     whisper_cpp_dir = resolve_project_path(args.whisper_cpp_dir)
     output_dir = resolve_project_path(args.output_dir) if args.output_dir is not None else default_output_dir(model_dir)
-    whisper_python_root = (
-        resolve_project_path(args.whisper_python_root)
-        if args.whisper_python_root is not None
-        else find_whisper_python_root()
+    whisper_python_dir = (
+        resolve_project_path(args.whisper_python_dir)
+        if args.whisper_python_dir is not None
+        else find_whisper_python_dir()
     )
 
     ensure_legacy_tokenizer_files(model_dir)
     validate_model_dir(model_dir)
-    validate_whisper_python_root(whisper_python_root)
+    validate_whisper_python_dir(whisper_python_dir)
     quantize_binary = find_quantize_binary(whisper_cpp_dir)
     library_dirs = library_dirs_from_project(whisper_cpp_dir)
     whisper_cpp_env = env_with_library_dirs(library_dirs)
@@ -261,7 +268,7 @@ def convert_merged_lora_whisper_model_to_whisper_cpp(args: argparse.Namespace) -
     ggml_path = convert_to_ggml(
         model_dir=model_dir,
         whisper_cpp_dir=whisper_cpp_dir,
-        whisper_python_root=whisper_python_root,
+        whisper_python_dir=whisper_python_dir,
         output_dir=output_dir,
         overwrite=args.overwrite,
         log_path=log_path,
@@ -283,7 +290,7 @@ def convert_merged_lora_whisper_model_to_whisper_cpp(args: argparse.Namespace) -
         "model_dir": str(model_dir),
         "whisper_cpp_dir": str(whisper_cpp_dir),
         "whisper_cpp_library_dirs": [str(path) for path in library_dirs],
-        "whisper_python_root": str(whisper_python_root),
+        "whisper_python_dir": str(whisper_python_dir),
         "output_dir": str(output_dir),
         "ggml_model": model_file_summary(ggml_path),
         "quantized_models": [model_file_summary(path) for path in quantized_paths],

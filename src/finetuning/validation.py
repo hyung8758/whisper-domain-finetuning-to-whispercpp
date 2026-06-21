@@ -91,15 +91,15 @@ def validate_jsonl_file(
 
 
 def validate_finetuning_data(
-    output_root: Path,
+    manifest_dir: Path,
     project_root: Path,
     max_errors: int = 20,
 ) -> dict[str, Any]:
-    summary: dict[str, Any] = {"output_root": str(output_root), "splits": {}, "errors": []}
+    summary: dict[str, Any] = {"manifest_dir": str(manifest_dir), "splits": {}, "errors": []}
     for split in FINETUNING_SPLITS:
         if len(summary["errors"]) >= max_errors:
             break
-        data_path = output_root / f"{split}.jsonl"
+        data_path = manifest_dir / f"{split}.jsonl"
         split_summary, errors = validate_jsonl_file(
             data_path=data_path,
             project_root=project_root,

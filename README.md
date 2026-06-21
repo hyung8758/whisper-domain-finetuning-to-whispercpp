@@ -19,7 +19,7 @@ pip install -r requirements.txt
 ```bash
 python scripts/prepare_data.py \
   --data_root ./data/download \
-  --output_root ./data/whisper_small_lora
+  --output_dir ./data/whisper_small_lora
 ```
 
 ### 1.3 LoRA 학습
@@ -44,7 +44,8 @@ python scripts/run_merged_whisper_decoding.py \
   --model_dir ./exp/merged/whisper_small_lora_epoch3_v2 \
   --manifest_path ./data/whisper_small_lora/eval.jsonl \
   --output_dir ./exp/results/whisper_small_lora_epoch3_v2_beam1_float16 \
-  --device cuda:0 \
+  --device cuda \
+  --device_index 0 \
   --beam_size 1 \
   --precision float16
 ```
@@ -142,7 +143,7 @@ cmake --build third_party/whisper.cpp/build \
 
 ```bash
 python scripts/validate_data.py \
-  --output_root ./data/whisper_small_lora
+  --manifest_dir ./data/whisper_small_lora
 ```
 
 ### 학습 config 변경

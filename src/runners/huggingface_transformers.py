@@ -19,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def apply_overrides(config: dict[str, Any], experiment: dict[str, Any], args) -> None:
-    for key in ("manifest_path", "result_root", "device", "language"):
+    for key in ("manifest_path", "output_root", "result_root", "device", "device_index", "language"):
         value = getattr(args, key, None)
         if value is not None:
             config[key] = str(value)
@@ -50,6 +50,18 @@ def build_run_config(config: dict[str, Any], experiment: dict[str, Any], result_
     if precision not in SUPPORTED_TORCH_PRECISIONS:
         raise ValueError(f"Unsupported precision={precision}. Supported values: {sorted(SUPPORTED_TORCH_PRECISIONS)}")
 
+    output_root = str(config.get("output_root", config["result_root"]))
+    output_dir = str(result_dir) if result_dir is not None else result_dir_for(config, experiment)
+    device_type = str(config["device"])
+    device_index = int(config.get("device_index", 0))
+    runtime_device = (
+        "cpu"
+        if device_type == "cpu"
+        else device_type
+        if ":" in device_type
+        else f"{device_type}:{device_index}"
+    )
+
     return {
         "engine": config["engine"],
         "runner": "huggingface_transformers",
@@ -58,9 +70,13 @@ def build_run_config(config: dict[str, Any], experiment: dict[str, Any], result_
         "beam_size": int(experiment.get("beam_size", config.get("decode_defaults", {}).get("beam_size", 1))),
         "precision": precision,
         "manifest_path": config["manifest_path"],
-        "result_root": config["result_root"],
-        "result_dir": str(result_dir) if result_dir is not None else result_dir_for(config, experiment),
-        "device": config["device"],
+        "output_root": output_root,
+        "output_dir": output_dir,
+        "result_root": output_root,
+        "result_dir": output_dir,
+        "device": runtime_device,
+        "device_type": "cuda" if runtime_device.startswith("cuda") else runtime_device,
+        "device_index": device_index,
         "language": config["language"],
         "transformers_options": build_transformers_options(config, experiment),
     }

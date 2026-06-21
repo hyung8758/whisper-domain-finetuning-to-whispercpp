@@ -7,8 +7,10 @@ from core.io import read_json
 DEFAULT_CONFIG = {
     "engine": "openai_whisper",
     "manifest_path": "data/benchmark/manifest.jsonl",
+    "output_root": "results",
     "result_root": "results",
-    "device": "cuda:0",
+    "device": "cuda",
+    "device_index": 0,
     "language": "ko",
     "decode_defaults": {
         "task": "transcribe",
@@ -69,7 +71,7 @@ def experiment_name(experiment: dict[str, Any]) -> str:
 
 def result_dir_for(config: dict[str, Any], experiment: dict[str, Any]) -> str:
     return str(
-        Path(config["result_root"])
+        Path(config.get("output_root", config["result_root"]))
         / safe_path_part(config["engine"])
         / safe_path_part(experiment["model"])
         / safe_path_part(experiment_name(experiment))

@@ -18,9 +18,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fine-tuned GGML 모델을 whisper.cpp server로 디코딩한다.")
     parser.add_argument("--model_path", type=Path, required=True)
     parser.add_argument("--manifest_path", type=Path, default=Path("data/whisper_small_lora/eval.jsonl"))
-    parser.add_argument("--result_dir", type=Path, required=True)
+    parser.add_argument("--output_dir", type=Path, default=None)
+    parser.add_argument("--result_dir", dest="output_dir", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     parser.add_argument("--server_binary_path", type=Path, default=Path("third_party/whisper.cpp/build/bin/whisper-server"))
-    parser.add_argument("--model", default=None)
+    parser.add_argument("--model_name", default=None)
+    parser.add_argument("--model", dest="model_name", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     parser.add_argument("--quantization", default=None)
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
@@ -39,7 +41,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry_errors", action="store_true")
     parser.add_argument("--no_warmup", action="store_true")
     parser.add_argument("--no_evaluate", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.output_dir is None:
+        parser.error("--output_dir is required")
+    return args
 
 
 def resolve_path(path: Path) -> Path:
@@ -58,8 +63,9 @@ def infer_quantization(model_path: Path) -> str:
 
 def build_config(args: argparse.Namespace) -> dict[str, Any]:
     model_path = resolve_path(args.model_path)
+    output_dir = resolve_path(args.output_dir)
     quantization = args.quantization or infer_quantization(model_path)
-    model_name = args.model or model_path.parent.name
+    model_name = args.model_name or model_path.parent.name
     experiment = f"{model_name}_{quantization}_beam{args.beam_size}_whisper_cpp_server"
     return {
         "engine": "whisper_cpp_server",
@@ -70,8 +76,10 @@ def build_config(args: argparse.Namespace) -> dict[str, Any]:
         "quantization": quantization,
         "precision": quantization,
         "manifest_path": str(resolve_path(args.manifest_path)),
-        "result_root": str(resolve_path(args.result_dir).parent),
-        "result_dir": str(resolve_path(args.result_dir)),
+        "result_root": str(output_dir.parent),
+        "result_dir": str(output_dir),
+        "output_root": str(output_dir.parent),
+        "output_dir": str(output_dir),
         "project_root": str(PROJECT_ROOT),
         "server_binary_path": str(resolve_path(args.server_binary_path)),
         "host": args.host,
@@ -99,7 +107,7 @@ def evaluate_if_needed(args: argparse.Namespace, manifest_path: Path, result_dir
         return
     if args.num_shards != 1:
         LOGGER.info("Shard mode detected. Evaluate after all shards finish:")
-        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --result_dir %s", manifest_path, result_dir)
+        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --output_dir %s", manifest_path, result_dir)
         return
 
     from core.metrics import evaluate_result_dir
@@ -122,7 +130,7 @@ def main() -> None:
     LOGGER.info("model_path=%s manifest=%s", config["model_path"], config["manifest_path"])
     run_whisper_cpp_server(config, args)
     evaluate_if_needed(args, manifest_path, result_dir)
-    LOGGER.info("Result dir: %s", result_dir)
+    LOGGER.info("Output dir: %s", result_dir)
     LOGGER.info("=== DONE whisper.cpp server decoding ===")
 
 
