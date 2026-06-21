@@ -144,6 +144,12 @@ def run_whisper_lora_training(config: dict[str, Any], project_root: Path) -> dic
     LOGGER.info("=== Whisper LoRA training started ===")
     LOGGER.info("Train dir: %s", train_dir)
     LOGGER.info("Base model: %s", config["base_model_name_or_path"])
+    LOGGER.info(
+        "CUDA visible devices=%s torch_cuda_available=%s torch_cuda_device_count=%s",
+        os.environ.get("CUDA_VISIBLE_DEVICES"),
+        torch.cuda.is_available(),
+        torch.cuda.device_count(),
+    )
     LOGGER.info("Train/dev/eval: %s / %s / %s", train_path, dev_path, resolve_project_path(project_root, config.get("eval_path")))
     LOGGER.info(
         "Epochs=%s save_strategy=epoch eval_strategy=epoch train_batch=%s eval_batch=%s grad_accum=%s fp16=%s bf16=%s",

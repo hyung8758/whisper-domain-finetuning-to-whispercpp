@@ -14,6 +14,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "task": "transcribe",
     "seed": 42,
     "sampling_rate": 16000,
+    "device": "cuda",
+    "device_index": 0,
     "train_path": "data/whisper_small_lora/train.jsonl",
     "dev_path": "data/whisper_small_lora/dev.jsonl",
     "eval_path": "data/whisper_small_lora/eval.jsonl",
