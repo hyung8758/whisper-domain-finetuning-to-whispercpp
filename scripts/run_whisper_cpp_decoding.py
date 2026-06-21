@@ -25,14 +25,18 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data/whisper_small_lora/eval.jsonl"),
     )
-    parser.add_argument("--result_root", type=Path, default=Path("exp/results"))
-    parser.add_argument("--result_dir", "--output_dir", dest="result_dir", type=Path, default=None)
+    parser.add_argument("--output_root", type=Path, default=Path("exp/results"))
+    parser.add_argument("--result_root", dest="output_root", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--output_dir", type=Path, default=None)
+    parser.add_argument("--result_dir", dest="output_dir", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     parser.add_argument("--whisper_cpp_dir", type=Path, default=DOMAIN_ROOT / "third_party" / "whisper.cpp")
     parser.add_argument("--language", default="ko")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--threads", type=int, default=None)
-    parser.add_argument("--gpu_device", type=int, default=None)
-    parser.add_argument("--no_gpu", action="store_true")
+    parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    parser.add_argument("--device_index", type=int, default=0)
+    parser.add_argument("--gpu_device", dest="device_index", type=int, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--no_gpu", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_index", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None)
@@ -51,10 +55,10 @@ def resolve_required_path(path: Path) -> Path:
     return resolved
 
 
-def default_result_dir(result_root: Path, model_path: Path, beam_size: int) -> Path:
+def default_output_dir(output_root: Path, model_path: Path, beam_size: int) -> Path:
     converted_name = model_path.parent.name
     model_name = model_path.stem.replace("ggml-model", "ggml").strip("-")
-    return result_root / f"{converted_name}_whisper_cpp_{model_name}_beam{beam_size}"
+    return output_root / f"{converted_name}_whisper_cpp_{model_name}_beam{beam_size}"
 
 
 def build_config(args: argparse.Namespace) -> dict[str, Any]:
@@ -62,12 +66,13 @@ def build_config(args: argparse.Namespace) -> dict[str, Any]:
 
     model_path = resolve_required_path(args.model_path)
     manifest_path = resolve_required_path(args.manifest_path)
-    result_root = resolve_required_path(args.result_root)
-    result_dir = (
-        resolve_required_path(args.result_dir)
-        if args.result_dir is not None
-        else default_result_dir(result_root, model_path, args.beam_size)
+    output_root = resolve_required_path(args.output_root)
+    output_dir = (
+        resolve_required_path(args.output_dir)
+        if args.output_dir is not None
+        else default_output_dir(output_root, model_path, args.beam_size)
     )
+    device = "cpu" if args.no_gpu else args.device
     whisper_cpp_dir = resolve_required_path(args.whisper_cpp_dir)
     whisper_cli = find_cli_binary(whisper_cpp_dir)
     if not model_path.is_file():
@@ -78,17 +83,21 @@ def build_config(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "engine": "whisper_cpp",
         "runner": "whisper_cpp_cli",
-        "experiment": result_dir.name,
+        "experiment": output_dir.name,
         "model_path": str(model_path),
         "whisper_cli": str(whisper_cli),
         "whisper_cpp_dir": str(whisper_cpp_dir),
         "beam_size": args.beam_size,
         "manifest_path": str(manifest_path),
-        "result_root": str(result_root),
-        "result_dir": str(result_dir),
+        "result_root": str(output_root),
+        "result_dir": str(output_dir),
+        "output_root": str(output_root),
+        "output_dir": str(output_dir),
         "language": args.language,
-        "use_gpu": not args.no_gpu,
-        "gpu_device": args.gpu_device,
+        "device": device,
+        "device_index": args.device_index,
+        "use_gpu": device == "cuda",
+        "gpu_device": args.device_index,
         "threads": args.threads,
         "decode_options": {
             "output_json": True,
@@ -112,10 +121,32 @@ def parse_time_offset_ms(value: Any) -> float | None:
 
 
 def parse_whisper_cpp_json(path: Path) -> tuple[str, list[dict[str, Any]]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    from decoding.errors import ControlledDecodeError
+
+    try:
+        raw_json = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ControlledDecodeError(
+            "whisper_cpp_json_invalid_utf8",
+            "whisper.cpp JSON output is not valid UTF-8 "
+            f"(json_path={path}, byte_position={exc.start}, details={exc.reason})",
+        ) from None
+
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise ControlledDecodeError(
+            "whisper_cpp_json_invalid",
+            "whisper.cpp JSON output is malformed "
+            f"(json_path={path}, line={exc.lineno}, column={exc.colno}, details={exc.msg})",
+        ) from None
+
     transcription = payload.get("transcription") or []
     if not isinstance(transcription, list):
-        raise ValueError(f"Invalid whisper.cpp JSON transcription: {path}")
+        raise ControlledDecodeError(
+            "whisper_cpp_json_invalid_schema",
+            f"whisper.cpp JSON transcription must be a list (json_path={path})",
+        )
 
     segments = []
     texts = []
@@ -154,9 +185,9 @@ def build_whisper_cpp_command(config: dict[str, Any], audio_path: Path, output_b
     ]
     if config.get("threads") is not None:
         command.extend(["-t", str(config["threads"])])
-    if config.get("gpu_device") is not None:
-        command.extend(["-dev", str(config["gpu_device"])])
-    if not config.get("use_gpu", True):
+    if config.get("device") == "cuda" and config.get("device_index") is not None:
+        command.extend(["-dev", str(config["device_index"])])
+    if config.get("device") == "cpu":
         command.append("-ng")
     return command
 
@@ -202,7 +233,7 @@ def evaluate_if_needed(args: argparse.Namespace, manifest_path: Path, result_dir
         return
     if args.num_shards != 1:
         LOGGER.info("Shard mode detected. Evaluate after all shards finish:")
-        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --result_dir %s", manifest_path, result_dir)
+        LOGGER.info("python scripts/evaluate_predictions.py --manifest_path %s --output_dir %s", manifest_path, result_dir)
         return
 
     from core.metrics import evaluate_result_dir
@@ -249,7 +280,7 @@ def main() -> None:
     write_json(decode_run.run_config_path, decode_run.run_config)
     fail_if_all_samples_failed(decode_run.run_config)
     evaluate_if_needed(args, Path(config["manifest_path"]), result_dir)
-    LOGGER.info("Result dir: %s", result_dir)
+    LOGGER.info("Output dir: %s", result_dir)
     LOGGER.info("=== DONE whisper.cpp decoding ===")
 
 

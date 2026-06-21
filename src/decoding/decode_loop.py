@@ -7,6 +7,7 @@ from typing import Any, Callable
 from tqdm import tqdm
 
 from core.io import append_jsonl
+from decoding.errors import ControlledDecodeError
 from decoding.run_utils import make_error_row, make_prediction_row
 
 
@@ -62,6 +63,11 @@ def decode_rows(
                 row.update(output.extra_fields)
                 append_jsonl(prediction_file, row)
                 decoded_count += 1
+            except ControlledDecodeError as exc:
+                decode_time = time.perf_counter() - start
+                append_jsonl(error_file, make_error_row(item, exc.reason, str(exc), decode_time, config))
+                logger.warning("Controlled decode failure id=%s reason=%s error=%s", item["id"], exc.reason, exc)
+                error_count += 1
             except Exception as exc:
                 decode_time = time.perf_counter() - start
                 append_jsonl(error_file, make_error_row(item, "decode_failed", str(exc), decode_time, config))
