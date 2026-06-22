@@ -26,7 +26,7 @@ python scripts/prepare_data.py \
 
 ```bash
 python scripts/train_whisper_lora.py \
-  --run_name whisper_small_lora_epoch3_v2
+  --exp_name whisper_small_lora_epoch3_v2
 ```
 
 ### 1.4 LoRA merge
@@ -171,7 +171,7 @@ training.fp16
 
 ```bash
 python scripts/train_whisper_lora.py \
-  --run_name whisper_small_lora_epoch3_v2_resume \
+  --exp_name whisper_small_lora_epoch3_v2_resume \
   --resume_from_checkpoint ./exp/train/whisper_small_lora_epoch3_v2/epochs/epoch_002
 ```
 
