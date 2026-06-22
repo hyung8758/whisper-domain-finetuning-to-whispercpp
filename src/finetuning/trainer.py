@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,8 @@ class EpochCheckpointCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs,
     ) -> TrainerControl:
+        if not args.should_save:
+            return control
         if state.epoch is None:
             return control
 
@@ -53,6 +56,42 @@ class EpochCheckpointCallback(TrainerCallback):
                 epoch_path.unlink()
         epoch_path.symlink_to(Path(os.path.relpath(checkpoint_dir, epoch_path.parent)))
         return control
+
+
+def process_rank() -> int:
+    return int(os.environ.get("RANK", "0"))
+
+
+def is_main_process() -> bool:
+    return process_rank() == 0
+
+
+def wait_for_path(path: Path, timeout_seconds: float = 300.0) -> None:
+    deadline = time.time() + timeout_seconds
+    while not path.exists():
+        if time.time() > deadline:
+            raise TimeoutError(f"Timed out waiting for path from main process: {path}")
+        time.sleep(0.5)
+
+
+def wait_for_distributed_processes() -> None:
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        torch.distributed.barrier()
+
+
+def prepare_train_dir(train_dir: Path, config: dict[str, Any]) -> None:
+    resume_from_checkpoint = config["training"].get("resume_from_checkpoint")
+    allow_existing = bool(resume_from_checkpoint)
+    distributed = any(name in os.environ for name in ("LOCAL_RANK", "RANK", "WORLD_SIZE"))
+
+    if is_main_process():
+        train_dir.mkdir(parents=True, exist_ok=allow_existing)
+        write_resolved_config(train_dir, config)
+    elif distributed:
+        wait_for_path(train_dir)
+    else:
+        train_dir.mkdir(parents=True, exist_ok=allow_existing)
+        write_resolved_config(train_dir, config)
 
 
 def setup_whisper_generation(model, processor, language: str, task: str) -> None:
@@ -78,7 +117,6 @@ def build_training_arguments(config: dict[str, Any], train_dir: Path) -> Seq2Seq
     training = config["training"]
     return Seq2SeqTrainingArguments(
         output_dir=str(train_dir / "checkpoints"),
-        run_name=train_dir.name,
         seed=int(config["seed"]),
         data_seed=int(config["seed"]),
         eval_strategy="epoch",
@@ -103,6 +141,7 @@ def build_training_arguments(config: dict[str, Any], train_dir: Path) -> Seq2Seq
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
+        ddp_find_unused_parameters=training.get("ddp_find_unused_parameters"),
         report_to=[],
     )
 
@@ -138,14 +177,16 @@ def run_whisper_lora_training(config: dict[str, Any], project_root: Path) -> dic
         raise FileNotFoundError(f"Dev data not found: {dev_path}")
 
     train_dir = make_train_dir(config, project_root)
-    train_dir.mkdir(parents=True, exist_ok=False)
-    write_resolved_config(train_dir, config)
+    prepare_train_dir(train_dir, config)
 
     LOGGER.info("=== Whisper LoRA training started ===")
     LOGGER.info("Train dir: %s", train_dir)
     LOGGER.info("Base model: %s", config["base_model_name_or_path"])
     LOGGER.info(
-        "CUDA visible devices=%s torch_cuda_available=%s torch_cuda_device_count=%s",
+        "Process rank=%s local_rank=%s world_size=%s CUDA visible devices=%s torch_cuda_available=%s torch_cuda_device_count=%s",
+        os.environ.get("RANK", "0"),
+        os.environ.get("LOCAL_RANK", "0"),
+        os.environ.get("WORLD_SIZE", "1"),
         os.environ.get("CUDA_VISIBLE_DEVICES"),
         torch.cuda.is_available(),
         torch.cuda.device_count(),
@@ -212,7 +253,9 @@ def run_whisper_lora_training(config: dict[str, Any], project_root: Path) -> dic
     LOGGER.info("Starting LoRA training: train=%s dev=%s output=%s", train_path, dev_path, train_dir)
     train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_model(str(train_dir / "adapter"))
-    processor.save_pretrained(train_dir / "processor")
+    if trainer.is_world_process_zero():
+        processor.save_pretrained(train_dir / "processor")
+    wait_for_distributed_processes()
 
     eval_path = resolve_project_path(project_root, config.get("eval_path"))
     epoch_checkpoints = list_epoch_checkpoints(train_dir)
@@ -234,14 +277,15 @@ def run_whisper_lora_training(config: dict[str, Any], project_root: Path) -> dic
         "processor_path": str(train_dir / "processor"),
         "training_summary_path": str(train_dir / "training_summary.json"),
     }
-    write_json(train_dir / "training_summary.json", summary)
-    if trainer.state.best_metric is not None:
-        LOGGER.info("Best eval loss: %s", trainer.state.best_metric)
-    if trainer.state.best_model_checkpoint is not None:
-        LOGGER.info("Best epoch checkpoint: %s", trainer.state.best_model_checkpoint)
-    if best_epoch_checkpoint is not None:
-        LOGGER.info("Best epoch alias: %s", best_epoch_checkpoint)
-    LOGGER.info("Best epoch adapter: %s", train_dir / "adapter")
-    LOGGER.info("Training summary: %s", train_dir / "training_summary.json")
-    LOGGER.info("=== DONE Whisper LoRA training ===")
+    if trainer.is_world_process_zero():
+        write_json(train_dir / "training_summary.json", summary)
+        if trainer.state.best_metric is not None:
+            LOGGER.info("Best eval loss: %s", trainer.state.best_metric)
+        if trainer.state.best_model_checkpoint is not None:
+            LOGGER.info("Best epoch checkpoint: %s", trainer.state.best_model_checkpoint)
+        if best_epoch_checkpoint is not None:
+            LOGGER.info("Best epoch alias: %s", best_epoch_checkpoint)
+        LOGGER.info("Best epoch adapter: %s", train_dir / "adapter")
+        LOGGER.info("Training summary: %s", train_dir / "training_summary.json")
+        LOGGER.info("=== DONE Whisper LoRA training ===")
     return summary

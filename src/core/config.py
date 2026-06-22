@@ -46,26 +46,26 @@ def copy_config(config: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def find_experiment(config: dict[str, Any], name: str | None) -> dict[str, Any]:
+def find_experiment(config: dict[str, Any], exp_name_filter: str | None) -> dict[str, Any]:
     experiments = config.get("experiments", [])
     if not experiments:
         raise ValueError("Config must contain at least one experiment.")
-    if name is None:
+    if exp_name_filter is None:
         return dict(experiments[0])
     for experiment in experiments:
-        if experiment["name"] == name:
+        if experiment["exp_name"] == exp_name_filter:
             return dict(experiment)
-    names = ", ".join(experiment["name"] for experiment in experiments)
-    raise ValueError(f"Unknown experiment: {name}. Available: {names}")
+    exp_names = ", ".join(experiment["exp_name"] for experiment in experiments)
+    raise ValueError(f"Unknown experiment: {exp_name_filter}. Available: {exp_names}")
 
 
 def safe_path_part(text: str) -> str:
     return text.replace("/", "_").replace(" ", "_")
 
 
-def experiment_name(experiment: dict[str, Any]) -> str:
-    if experiment.get("name"):
-        return experiment["name"]
+def exp_name(experiment: dict[str, Any]) -> str:
+    if experiment.get("exp_name"):
+        return experiment["exp_name"]
     return f"{experiment['model']}_beam{experiment.get('beam_size', 5)}_{experiment.get('precision', 'fp16')}"
 
 
@@ -74,7 +74,7 @@ def result_dir_for(config: dict[str, Any], experiment: dict[str, Any]) -> str:
         Path(config.get("output_root", config["result_root"]))
         / safe_path_part(config["engine"])
         / safe_path_part(experiment["model"])
-        / safe_path_part(experiment_name(experiment))
+        / safe_path_part(exp_name(experiment))
     )
 
 

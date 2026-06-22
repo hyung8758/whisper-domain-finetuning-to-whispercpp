@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from core.cuda import validate_cuda_device
-from core.config import experiment_name, result_dir_for
+from core.config import exp_name, result_dir_for
 from core.io import write_json
 from core.precision import SUPPORTED_TORCH_PRECISIONS, torch_dtype_from_precision
 from data.audio import TARGET_SAMPLE_RATE, load_audio_array
@@ -65,7 +65,7 @@ def build_run_config(config: dict[str, Any], experiment: dict[str, Any], result_
     return {
         "engine": config["engine"],
         "runner": "huggingface_transformers",
-        "experiment": experiment_name(experiment),
+        "experiment": exp_name(experiment),
         "model": experiment["model"],
         "beam_size": int(experiment.get("beam_size", config.get("decode_defaults", {}).get("beam_size", 1))),
         "precision": precision,

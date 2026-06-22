@@ -15,12 +15,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "seed": 42,
     "sampling_rate": 16000,
     "device": "cuda",
-    "device_index": 0,
+    "device_index": None,
     "train_path": "data/whisper_small_lora/train.jsonl",
     "dev_path": "data/whisper_small_lora/dev.jsonl",
     "eval_path": "data/whisper_small_lora/eval.jsonl",
     "output_root": "exp/train",
-    "run_name": None,
+    "exp_name": None,
     "lora": {
         "r": 16,
         "alpha": 32,
@@ -77,12 +77,12 @@ def resolve_project_path(project_root: Path, path_value: str | Path | None) -> P
 def make_train_dir(config: dict[str, Any], project_root: Path) -> Path:
     output_root = resolve_project_path(project_root, config["output_root"])
     assert output_root is not None
-    run_name = config.get("run_name")
-    if not run_name:
+    exp_name = config.get("exp_name")
+    if not exp_name:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_name = str(config["base_model_name_or_path"]).split("/")[-1]
-        run_name = f"{timestamp}_{model_name}_lora"
-    return output_root / str(run_name)
+        exp_name = f"{timestamp}_{model_name}_lora"
+    return output_root / str(exp_name)
 
 
 def write_resolved_config(train_dir: Path, config: dict[str, Any]) -> None:

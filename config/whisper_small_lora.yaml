@@ -3,12 +3,14 @@ language: Korean
 task: transcribe
 seed: 42
 sampling_rate: 16000
+device: cuda
+device_index:
 
 train_path: data/whisper_small_lora/train.jsonl
 dev_path: data/whisper_small_lora/dev.jsonl
 eval_path: data/whisper_small_lora/eval.jsonl
 output_root: exp/train
-run_name:
+exp_name:
 
 lora:
   r: 16

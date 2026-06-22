@@ -40,8 +40,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def default_output_dir(output_root: Path, experiment_name: str) -> Path:
-    return output_root / experiment_name
+def default_output_dir(output_root: Path, exp_name: str) -> Path:
+    return output_root / exp_name
 
 
 def resolve_required_path(path: Path) -> Path:
@@ -59,11 +59,11 @@ def build_config(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     model_dir = resolve_required_path(args.model_dir)
     manifest_path = resolve_required_path(args.manifest_path)
     output_root = resolve_required_path(args.output_root)
-    experiment_name = f"{model_dir.name}_beam{args.beam_size}_{args.precision}"
+    exp_name = f"{model_dir.name}_beam{args.beam_size}_{args.precision}"
     output_dir = (
         resolve_required_path(args.output_dir)
         if args.output_dir is not None
-        else default_output_dir(output_root, experiment_name)
+        else default_output_dir(output_root, exp_name)
     )
     runtime_device = "cpu" if args.device == "cpu" else f"cuda:{args.device_index}"
 
@@ -85,7 +85,7 @@ def build_config(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         },
     }
     experiment = {
-        "name": experiment_name,
+        "exp_name": exp_name,
         "model": str(model_dir),
         "beam_size": args.beam_size,
         "precision": args.precision,
