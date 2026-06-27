@@ -6,6 +6,8 @@ transformers
 accelerate
 peft
 openai-whisper
+faster-whisper
+ctranslate2
 pyyaml
 requests
 tqdm
