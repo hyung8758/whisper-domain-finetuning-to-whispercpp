@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry_errors", action="store_true")
     parser.add_argument("--no_warmup", action="store_true")
     parser.add_argument("--no_evaluate", action="store_true")
+    parser.add_argument(
+        "--treat_replacement_as_error",
+        action="store_true",
+        help="Treat U+FFFD replacement characters in server text as controlled decode errors.",
+    )
     args = parser.parse_args()
     if args.output_dir is None:
         parser.error("--output_dir is required")
@@ -98,6 +103,7 @@ def build_config(args: argparse.Namespace) -> dict[str, Any]:
         "request_timeout_seconds": args.request_timeout_seconds,
         "server_start_timeout_seconds": args.server_start_timeout_seconds,
         "warmup": not args.no_warmup,
+        "treat_replacement_as_error": args.treat_replacement_as_error,
     }
 
 

@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from core.io import append_jsonl, write_json
 from decoding.audio import prepared_audio_path
+from decoding.errors import ControlledDecodeError
 from decoding.run_utils import (
     fail_if_all_samples_failed,
     finish_run,
@@ -17,6 +18,7 @@ from decoding.run_utils import (
     make_prediction_row,
     prepare_decode_run,
 )
+from decoding.utf8 import prediction_replacement_char_count
 from whisper_cpp.runtime import env_with_library_dirs, library_dirs_from_build_dir
 
 
@@ -165,6 +167,18 @@ def parse_response(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]], flo
     return prediction_raw, segments, float(inference_sec) if inference_sec is not None else None
 
 
+def validate_prediction_text(config: dict[str, Any], prediction_raw: str, segments: list[dict[str, Any]]) -> None:
+    replacement_count = prediction_replacement_char_count(prediction_raw, segments)
+    if replacement_count == 0:
+        return
+    if not config.get("treat_replacement_as_error"):
+        return
+    raise ControlledDecodeError(
+        "whisper_cpp_utf8_replacement",
+        f"whisper.cpp server text contains U+FFFD replacement characters (count={replacement_count})",
+    )
+
+
 def transcribe(
     server_url: str,
     item: dict[str, Any],
@@ -229,6 +243,7 @@ def decode_rows(
                     project_root,
                 )
                 prediction_raw, segments, inference_sec = parse_response(data)
+                validate_prediction_text(config, prediction_raw, segments)
                 backend_time = inference_sec if inference_sec is not None else request_time
                 row = make_prediction_row(item, prediction_raw, segments, backend_time, config)
                 row["request_time"] = round(request_time, 6)
@@ -236,6 +251,11 @@ def decode_rows(
                 row["timing_source"] = "server_timings" if inference_sec is not None else "http_request"
                 append_jsonl(prediction_file, row)
                 decoded_count += 1
+            except ControlledDecodeError as exc:
+                request_time = time.perf_counter() - start
+                append_jsonl(error_file, make_error_row(item, exc.reason, str(exc), request_time, config))
+                LOGGER.warning("Controlled decode failure id=%s reason=%s error=%s", item["id"], exc.reason, exc)
+                error_count += 1
             except Exception as exc:
                 request_time = time.perf_counter() - start
                 append_jsonl(error_file, make_error_row(item, "decode_failed", str(exc), request_time, config))

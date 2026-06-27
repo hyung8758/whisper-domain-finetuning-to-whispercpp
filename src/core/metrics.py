@@ -4,6 +4,7 @@ from typing import Any
 
 from core.io import read_jsonl, write_json, write_jsonl
 from core.text import char_tokens, word_tokens
+from decoding.utf8 import prediction_replacement_char_count
 
 
 BUCKETS = ("short", "mid", "long")
@@ -39,6 +40,8 @@ def new_stats() -> dict[str, Any]:
         "char_total": 0,
         "word_errors": 0,
         "word_total": 0,
+        "utf8_replacement_rows": 0,
+        "utf8_replacement_char_count": 0,
         "rtfs": [],
     }
 
@@ -56,6 +59,13 @@ def add_row(stats: dict[str, Any], row: dict[str, Any]) -> None:
     stats["char_total"] += len(ref_chars)
     stats["word_errors"] += edit_distance(ref_words, hyp_words)
     stats["word_total"] += len(ref_words)
+    replacement_count = row.get("utf8_replacement_char_count")
+    if replacement_count is None:
+        replacement_count = prediction_replacement_char_count(row.get("prediction_raw", ""), row.get("segments", []))
+    replacement_count = int(replacement_count or 0)
+    stats["utf8_replacement_char_count"] += replacement_count
+    if replacement_count > 0:
+        stats["utf8_replacement_rows"] += 1
     if row.get("rtf") is not None:
         stats["rtfs"].append(float(row["rtf"]))
 
@@ -75,6 +85,11 @@ def finish_stats(stats: dict[str, Any]) -> dict[str, Any]:
     stats["p50_rtf"] = median(rtfs) if rtfs else None
     stats["p90_rtf"] = percentile(rtfs, 0.90)
     stats["avg_decode_time"] = decode_time_sec / stats["samples"] if stats["samples"] else None
+    samples = stats["samples"]
+    replacement_rows = stats["utf8_replacement_rows"]
+    stats["clean_samples"] = samples - replacement_rows
+    stats["utf8_replacement_row_rate"] = 100.0 * replacement_rows / samples if samples else None
+    stats["clean_sample_rate"] = 100.0 * stats["clean_samples"] / samples if samples else None
     return stats
 
 

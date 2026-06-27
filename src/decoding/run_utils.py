@@ -7,6 +7,7 @@ from core.config import output_paths
 from core.io import read_jsonl
 from core.sharding import select_shard
 from core.text import normalize_text
+from decoding.utf8 import prediction_replacement_char_count
 
 
 @dataclass
@@ -120,6 +121,7 @@ def make_prediction_row(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     duration = float(item["duration"])
+    utf8_replacement_count = prediction_replacement_char_count(prediction_raw, segments)
     row = {
         "id": item["id"],
         "audio": item["audio"],
@@ -135,6 +137,8 @@ def make_prediction_row(
         "decode_time": round(decode_time, 6),
         "rtf": round(decode_time / duration, 6) if duration > 0 else None,
         "segments": segments,
+        "utf8_replacement_char_count": utf8_replacement_count,
+        "has_utf8_replacement": utf8_replacement_count > 0,
         **result_metadata(config),
     }
     copy_optional_item_fields(row, item)
